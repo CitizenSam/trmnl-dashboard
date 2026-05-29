@@ -143,6 +143,7 @@ export default async function handler() {
     });
 
     console.log(`Got ${filtered.length} bus departures`);
+console.log("Sample departure:", JSON.stringify(departures[0] ?? {}));
   } catch (err) {
     console.error("Failed to fetch bus departures:", err.message);
   }
