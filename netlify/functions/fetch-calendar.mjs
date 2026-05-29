@@ -142,8 +142,7 @@ export default async function handler() {
       };
     });
 
-    console.log(`Got ${filtered.length} bus departures`);
-console.log("Sample departure:", JSON.stringify(departures[0] ?? {}));
+    console.log(`Got ${filtered.length} bus departures, first time: ${filtered[0]?.departure?.aimed}`);
   } catch (err) {
     console.error("Failed to fetch bus departures:", err.message);
   }
