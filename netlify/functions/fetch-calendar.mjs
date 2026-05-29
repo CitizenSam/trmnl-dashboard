@@ -7,7 +7,7 @@ import { google } from "googleapis";
 // METLINK_API_KEY              — your Metlink API key
 
 export const config = {
-  schedule: "*/5 * * * *", // every 5 minutes
+  schedule: "*/15 * * * *", // every 5 minutes
 };
 
 const STOP_ID = "7124";
