@@ -124,9 +124,9 @@ export default async function handler() {
       })
       .slice(0, 4);
 
-    filtered.forEach((d, i) => {
+      filtered.forEach((d, i) => {
       // Use aimed departure time, fall back to expected
-      const timeRaw = d.aimed ?? d.expected;
+      const timeRaw = d.departure?.aimed ?? d.departure?.expected;
       const timeLabel = timeRaw
         ? new Date(timeRaw).toLocaleTimeString("en-NZ", {
             timeZone: "Pacific/Auckland",
