@@ -4,40 +4,40 @@ import { google } from "googleapis";
 // GOOGLE_SERVICE_ACCOUNT_JSON  — the full contents of your service account key JSON
 // TRMNL_WEBHOOK_URL            — your plugin's webhook URL from the TRMNL dashboard
 // CALENDAR_IDS                 — comma-separated list of calendar IDs to merge
-//                                e.g. "me@gmail.com,abc123@group.calendar.google.com"
+// METLINK_API_KEY              — your Metlink API key
 
 export const config = {
   schedule: "*/5 * * * *", // every 5 minutes
 };
 
+const STOP_ID = "7124";
+
 // ── Weather code to text description ────────────────────────────────────────
 function weatherDescription(code) {
-  if (code === 0)            return "Clear sky";
-  if (code === 1)            return "Mainly clear";
-  if (code === 2)            return "Partly cloudy";
-  if (code === 3)            return "Overcast";
-  if (code <= 49)            return "Foggy";
-  if (code <= 55)            return "Drizzle";
-  if (code <= 67)            return "Rain";
-  if (code <= 77)            return "Snow";
-  if (code <= 82)            return "Rain showers";
-  if (code <= 86)            return "Snow showers";
-  if (code <= 99)            return "Thunderstorm";
+  if (code === 0)  return "Clear sky";
+  if (code === 1)  return "Mainly clear";
+  if (code === 2)  return "Partly cloudy";
+  if (code === 3)  return "Overcast";
+  if (code <= 49)  return "Foggy";
+  if (code <= 55)  return "Drizzle";
+  if (code <= 67)  return "Rain";
+  if (code <= 77)  return "Snow";
+  if (code <= 82)  return "Rain showers";
+  if (code <= 86)  return "Snow showers";
+  if (code <= 99)  return "Thunderstorm";
   return "Unknown";
 }
 
-// ── Weather code to simple text icon ────────────────────────────────────────
-// These are plain ASCII — safe for e-ink rendering
 function weatherIcon(code) {
-  if (code === 0)            return "CLEAR";
-  if (code <= 2)             return "CLEAR";
-  if (code === 3)            return "CLOUD";
-  if (code <= 49)            return "FOG";
-  if (code <= 67)            return "RAIN";
-  if (code <= 77)            return "SNOW";
-  if (code <= 82)            return "RAIN";
-  if (code <= 86)            return "SNOW";
-  if (code <= 99)            return "STORM";
+  if (code === 0)  return "CLEAR";
+  if (code <= 2)   return "CLEAR";
+  if (code === 3)  return "CLOUD";
+  if (code <= 49)  return "FOG";
+  if (code <= 67)  return "RAIN";
+  if (code <= 77)  return "SNOW";
+  if (code <= 82)  return "RAIN";
+  if (code <= 86)  return "SNOW";
+  if (code <= 99)  return "STORM";
   return "?";
 }
 
@@ -71,11 +71,8 @@ export default async function handler() {
   });
 
   // ── Fetch weather from Open-Meteo (Wellington) ────────────────────────────
-  let weatherTemp = "";
-  let weatherHigh = "";
-  let weatherLow  = "";
-  let weatherDesc = "";
-  let weatherIconText = "";
+  let weatherTemp = "", weatherHigh = "", weatherLow = "";
+  let weatherDesc = "", weatherIconText = "";
 
   try {
     const weatherRes = await fetch(
@@ -91,6 +88,63 @@ export default async function handler() {
     console.log(`Weather: ${weatherTemp}°C, ${weatherDesc}`);
   } catch (err) {
     console.error("Failed to fetch weather:", err.message);
+  }
+
+  // ── Fetch bus departures from Metlink ─────────────────────────────────────
+  const buses = [
+    { route: "", time: "" },
+    { route: "", time: "" },
+    { route: "", time: "" },
+    { route: "", time: "" },
+  ];
+
+  try {
+    const metlinkRes = await fetch(
+      `https://api.opendata.metlink.org.nz/v1/stop-predictions?stop_id=${STOP_ID}`,
+      {
+        headers: {
+          "x-api-key": process.env.METLINK_API_KEY,
+          "Accept": "application/json",
+        },
+      }
+    );
+
+    if (!metlinkRes.ok) {
+      throw new Error(`Metlink API error: ${metlinkRes.status}`);
+    }
+
+    const metlinkData = await metlinkRes.json();
+    const departures = metlinkData.departures ?? [];
+
+    // Filter to only routes 1 and 32X, take next 4
+    const filtered = departures
+      .filter((d) => {
+        const route = (d.service_id ?? "").toString().toUpperCase();
+        return route === "1" || route === "32X";
+      })
+      .slice(0, 4);
+
+    filtered.forEach((d, i) => {
+      // Use aimed departure time, fall back to expected
+      const timeRaw = d.aimed ?? d.expected;
+      const timeLabel = timeRaw
+        ? new Date(timeRaw).toLocaleTimeString("en-NZ", {
+            timeZone: "Pacific/Auckland",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }).replace("am", "AM").replace("pm", "PM")
+        : "";
+
+      buses[i] = {
+        route: (d.service_id ?? "").toString().toUpperCase(),
+        time: timeLabel,
+      };
+    });
+
+    console.log(`Got ${filtered.length} bus departures`);
+  } catch (err) {
+    console.error("Failed to fetch bus departures:", err.message);
   }
 
   // ── Fetch from each calendar ──────────────────────────────────────────────
@@ -171,6 +225,14 @@ export default async function handler() {
       weather_low:     weatherLow,
       weather_desc:    weatherDesc,
       weather_icon:    weatherIconText,
+      bus_1_route:     buses[0].route,
+      bus_1_time:      buses[0].time,
+      bus_2_route:     buses[1].route,
+      bus_2_time:      buses[1].time,
+      bus_3_route:     buses[2].route,
+      bus_3_time:      buses[2].time,
+      bus_4_route:     buses[3].route,
+      bus_4_time:      buses[3].time,
     },
   };
 
@@ -184,5 +246,5 @@ export default async function handler() {
     throw new Error(`TRMNL webhook failed: ${response.status} ${await response.text()}`);
   }
 
-  console.log(`Posted ${events.length} events and weather to TRMNL`);
+  console.log(`Posted ${events.length} events, weather, and ${buses.filter(b => b.route).length} buses to TRMNL`);
 }
