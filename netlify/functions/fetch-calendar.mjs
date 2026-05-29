@@ -10,6 +10,37 @@ export const config = {
   schedule: "*/5 * * * *", // every 5 minutes
 };
 
+// ── Weather code to text description ────────────────────────────────────────
+function weatherDescription(code) {
+  if (code === 0)            return "Clear sky";
+  if (code === 1)            return "Mainly clear";
+  if (code === 2)            return "Partly cloudy";
+  if (code === 3)            return "Overcast";
+  if (code <= 49)            return "Foggy";
+  if (code <= 55)            return "Drizzle";
+  if (code <= 67)            return "Rain";
+  if (code <= 77)            return "Snow";
+  if (code <= 82)            return "Rain showers";
+  if (code <= 86)            return "Snow showers";
+  if (code <= 99)            return "Thunderstorm";
+  return "Unknown";
+}
+
+// ── Weather code to simple text icon ────────────────────────────────────────
+// These are plain ASCII — safe for e-ink rendering
+function weatherIcon(code) {
+  if (code === 0)            return "CLEAR";
+  if (code <= 2)             return "CLEAR";
+  if (code === 3)            return "CLOUD";
+  if (code <= 49)            return "FOG";
+  if (code <= 67)            return "RAIN";
+  if (code <= 77)            return "SNOW";
+  if (code <= 82)            return "RAIN";
+  if (code <= 86)            return "SNOW";
+  if (code <= 99)            return "STORM";
+  return "?";
+}
+
 export default async function handler() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
@@ -22,14 +53,12 @@ export default async function handler() {
   // ── Time range: today in NZ time ──────────────────────────────────────────
   const nowUTC = new Date();
 
-  // NZ is UTC+12 (NZST) or UTC+13 (NZDT). Using Intl to get the correct date.
   const nzDateStr = nowUTC.toLocaleDateString("en-NZ", {
     timeZone: "Pacific/Auckland",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   });
-  // en-NZ gives DD/MM/YYYY — parse it
   const [day, month, year] = nzDateStr.split("/");
   const startOfDay = new Date(`${year}-${month}-${day}T00:00:00+12:00`);
   const endOfDay   = new Date(`${year}-${month}-${day}T23:59:59+12:00`);
@@ -39,11 +68,33 @@ export default async function handler() {
     weekday: "long",
     day: "numeric",
     month: "long",
-  }); // e.g. "Saturday 30 May"
+  });
+
+  // ── Fetch weather from Open-Meteo (Wellington) ────────────────────────────
+  let weatherTemp = "";
+  let weatherHigh = "";
+  let weatherLow  = "";
+  let weatherDesc = "";
+  let weatherIconText = "";
+
+  try {
+    const weatherRes = await fetch(
+      "https://api.open-meteo.com/v1/forecast?latitude=-41.2865&longitude=174.7762&current=temperature_2m,weathercode&daily=temperature_2m_max,temperature_2m_min&timezone=Pacific%2FAuckland&forecast_days=1"
+    );
+    const weatherData = await weatherRes.json();
+    const code = weatherData.current.weathercode;
+    weatherTemp     = Math.round(weatherData.current.temperature_2m).toString();
+    weatherHigh     = Math.round(weatherData.daily.temperature_2m_max[0]).toString();
+    weatherLow      = Math.round(weatherData.daily.temperature_2m_min[0]).toString();
+    weatherDesc     = weatherDescription(code);
+    weatherIconText = weatherIcon(code);
+    console.log(`Weather: ${weatherTemp}°C, ${weatherDesc}`);
+  } catch (err) {
+    console.error("Failed to fetch weather:", err.message);
+  }
 
   // ── Fetch from each calendar ──────────────────────────────────────────────
   const calendarIds = process.env.CALENDAR_IDS.split(",").map((s) => s.trim());
-
   const allEvents = [];
 
   await Promise.all(
@@ -68,13 +119,9 @@ export default async function handler() {
     .map((event) => {
       const isAllDay = Boolean(event.start?.date && !event.start?.dateTime);
       const startRaw = isAllDay ? event.start.date : event.start.dateTime;
-
-      // Sort key: all-day events sort to top (00:00), timed events by actual time
       const sortTime = isAllDay
         ? new Date(`${event.start.date}T00:00:00`)
         : new Date(startRaw);
-
-      // Friendly time label in NZ time
       const timeLabel = isAllDay
         ? null
         : new Date(startRaw).toLocaleTimeString("en-NZ", {
@@ -83,22 +130,19 @@ export default async function handler() {
             minute: "2-digit",
             hour12: true,
           }).replace("am", "AM").replace("pm", "PM");
-
       return {
         title: event.summary ?? "(No title)",
-        time: timeLabel,       // null for all-day
+        time: timeLabel,
         all_day: isAllDay,
         sort_time: sortTime,
       };
     })
-    // Deduplicate by title + time (same event appearing in multiple calendars)
     .filter((event, index, arr) =>
       arr.findIndex(
         (e) => e.title === event.title && e.time === event.time
       ) === index
     )
     .sort((a, b) => a.sort_time - b.sort_time)
-    // Strip the internal sort key before sending
     .map(({ sort_time, ...event }) => event);
 
   // ── Updated-at label ──────────────────────────────────────────────────────
@@ -122,6 +166,11 @@ export default async function handler() {
       today_date:      todayLabel,
       updated_at:      updatedAt,
       calendar_events: events,
+      weather_temp:    weatherTemp,
+      weather_high:    weatherHigh,
+      weather_low:     weatherLow,
+      weather_desc:    weatherDesc,
+      weather_icon:    weatherIconText,
     },
   };
 
@@ -135,5 +184,5 @@ export default async function handler() {
     throw new Error(`TRMNL webhook failed: ${response.status} ${await response.text()}`);
   }
 
-  console.log(`Posted ${events.length} events to TRMNL`);
+  console.log(`Posted ${events.length} events and weather to TRMNL`);
 }
