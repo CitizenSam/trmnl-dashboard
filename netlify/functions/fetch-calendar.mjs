@@ -43,11 +43,7 @@ function weatherIcon(code) {
 // Open-Meteo returns sunrise/sunset as local time strings like "2026-05-30T07:35"
 // We parse them directly to avoid timezone misinterpretation
 function parseLocalTime(isoLocal) {
-  const timePart = isoLocal.slice(11, 16); // "07:35"
-  const [h, m] = timePart.split(":").map(Number);
-  const period = h >= 12 ? "PM" : "AM";
-  const hour12 = h % 12 || 12;
-  return `${hour12}:${String(m).padStart(2, "0")} ${period}`;
+  return isoLocal.slice(11, 16); // returns "07:35" directly
 }
 
 function formatTime(isoString) {
