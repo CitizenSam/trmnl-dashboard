@@ -7,12 +7,11 @@ import { google } from "googleapis";
 // METLINK_API_KEY              — your Metlink API key
 
 export const config = {
-  schedule: "*/15 * * * *", // every 5 minutes
+  schedule: "*/15 * * * *", // every 15 minutes
 };
 
 const STOP_ID = "7124";
 
-// ── Weather code to text description ────────────────────────────────────────
 function weatherDescription(code) {
   if (code === 0)  return "Clear sky";
   if (code === 1)  return "Mainly clear";
@@ -38,7 +37,16 @@ function weatherIcon(code) {
   if (code <= 82)  return "RAIN";
   if (code <= 86)  return "SNOW";
   if (code <= 99)  return "STORM";
-  return "?";
+  return "CLEAR";
+}
+
+function formatTime(isoString) {
+  return new Date(isoString).toLocaleTimeString("en-NZ", {
+    timeZone: "Pacific/Auckland",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).replace("am", "AM").replace("pm", "PM");
 }
 
 export default async function handler() {
@@ -73,19 +81,29 @@ export default async function handler() {
   // ── Fetch weather from Open-Meteo (Wellington) ────────────────────────────
   let weatherTemp = "", weatherHigh = "", weatherLow = "";
   let weatherDesc = "", weatherIconText = "";
+  let weatherWind = "", weatherRain = "";
+  let weatherSunrise = "", weatherSunset = "";
 
   try {
     const weatherRes = await fetch(
-      "https://api.open-meteo.com/v1/forecast?latitude=-41.2865&longitude=174.7762&current=temperature_2m,weathercode&daily=temperature_2m_max,temperature_2m_min&timezone=Pacific%2FAuckland&forecast_days=1"
+      "https://api.open-meteo.com/v1/forecast" +
+      "?latitude=-41.2865&longitude=174.7762" +
+      "&current=temperature_2m,weathercode,windspeed_10m" +
+      "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset,windspeed_10m_max" +
+      "&timezone=Pacific%2FAuckland&forecast_days=1"
     );
-    const weatherData = await weatherRes.json();
-    const code = weatherData.current.weathercode;
-    weatherTemp     = Math.round(weatherData.current.temperature_2m).toString();
-    weatherHigh     = Math.round(weatherData.daily.temperature_2m_max[0]).toString();
-    weatherLow      = Math.round(weatherData.daily.temperature_2m_min[0]).toString();
+    const w = await weatherRes.json();
+    const code = w.current.weathercode;
+    weatherTemp     = Math.round(w.current.temperature_2m).toString();
+    weatherHigh     = Math.round(w.daily.temperature_2m_max[0]).toString();
+    weatherLow      = Math.round(w.daily.temperature_2m_min[0]).toString();
     weatherDesc     = weatherDescription(code);
     weatherIconText = weatherIcon(code);
-    console.log(`Weather: ${weatherTemp}°C, ${weatherDesc}`);
+    weatherWind     = Math.round(w.daily.windspeed_10m_max[0]).toString();
+    weatherRain     = w.daily.precipitation_sum[0].toFixed(1);
+    weatherSunrise  = formatTime(w.daily.sunrise[0]);
+    weatherSunset   = formatTime(w.daily.sunset[0]);
+    console.log(`Weather: ${weatherTemp}°C, ${weatherDesc}, wind ${weatherWind}km/h, rain ${weatherRain}mm`);
   } catch (err) {
     console.error("Failed to fetch weather:", err.message);
   }
@@ -116,7 +134,6 @@ export default async function handler() {
     const metlinkData = await metlinkRes.json();
     const departures = metlinkData.departures ?? [];
 
-    // Filter to only routes 1 and 32X, take next 4
     const filtered = departures
       .filter((d) => {
         const route = (d.service_id ?? "").toString().toUpperCase();
@@ -124,16 +141,15 @@ export default async function handler() {
       })
       .slice(0, 4);
 
-      filtered.forEach((d, i) => {
-      // Use aimed departure time, fall back to expected
+    filtered.forEach((d, i) => {
       const timeRaw = d.departure?.aimed ?? d.departure?.expected;
       const timeLabel = timeRaw
         ? new Date(timeRaw).toLocaleTimeString("en-NZ", {
             timeZone: "Pacific/Auckland",
             hour: "numeric",
             minute: "2-digit",
-            hour12: true,
-          }).replace("am", "AM").replace("pm", "PM")
+            hour12: false,
+          })
         : "";
 
       buses[i] = {
@@ -142,7 +158,7 @@ export default async function handler() {
       };
     });
 
-    console.log(`Got ${filtered.length} bus departures, first time: ${filtered[0]?.departure?.aimed}`);
+    console.log(`Got ${filtered.length} bus departures, first: ${buses[0].time}`);
   } catch (err) {
     console.error("Failed to fetch bus departures:", err.message);
   }
@@ -225,6 +241,10 @@ export default async function handler() {
       weather_low:     weatherLow,
       weather_desc:    weatherDesc,
       weather_icon:    weatherIconText,
+      weather_wind:    weatherWind,
+      weather_rain:    weatherRain,
+      weather_sunrise: weatherSunrise,
+      weather_sunset:  weatherSunset,
       bus_1_route:     buses[0].route,
       bus_1_time:      buses[0].time,
       bus_2_route:     buses[1].route,
