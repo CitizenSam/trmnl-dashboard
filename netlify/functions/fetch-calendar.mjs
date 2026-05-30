@@ -40,6 +40,16 @@ function weatherIcon(code) {
   return "CLEAR";
 }
 
+// Open-Meteo returns sunrise/sunset as local time strings like "2026-05-30T07:35"
+// We parse them directly to avoid timezone misinterpretation
+function parseLocalTime(isoLocal) {
+  const timePart = isoLocal.slice(11, 16); // "07:35"
+  const [h, m] = timePart.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const hour12 = h % 12 || 12;
+  return `${hour12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
 function formatTime(isoString) {
   return new Date(isoString).toLocaleTimeString("en-NZ", {
     timeZone: "Pacific/Auckland",
@@ -101,9 +111,9 @@ export default async function handler() {
     weatherIconText = weatherIcon(code);
     weatherWind     = Math.round(w.daily.windspeed_10m_max[0]).toString();
     weatherRain     = w.daily.precipitation_sum[0].toFixed(1);
-    weatherSunrise  = formatTime(w.daily.sunrise[0]);
-    weatherSunset   = formatTime(w.daily.sunset[0]);
-    console.log(`Weather: ${weatherTemp}°C, ${weatherDesc}, wind ${weatherWind}km/h, rain ${weatherRain}mm`);
+    weatherSunrise  = parseLocalTime(w.daily.sunrise[0]);
+    weatherSunset   = parseLocalTime(w.daily.sunset[0]);
+    console.log(`Weather: ${weatherTemp}°C, ${weatherDesc}, wind ${weatherWind}km/h, sunrise ${weatherSunrise}, sunset ${weatherSunset}`);
   } catch (err) {
     console.error("Failed to fetch weather:", err.message);
   }
