@@ -216,17 +216,6 @@
 </head>
 <body>
   <div id="board">
-    <header>
-      <div class="stop">
-        <span class="id" id="stopId">STOP 5510</span>
-        <span class="name" id="stopName">—</span>
-      </div>
-      <div class="clock">
-        <span class="time" id="clock">--:--:--</span>
-        <span class="feed" id="feed"><span class="dot"></span><span id="feedTxt">boot</span></span>
-      </div>
-    </header>
-
     <div id="list"></div>
     <div id="empty">No buses in the next hour</div>
 
@@ -267,9 +256,6 @@ const $ = s => document.querySelector(s);
 const listEl = $('#list'), emptyEl = $('#empty');
 const feedEl = $('#feed'), feedTxt = $('#feedTxt');
 
-$('#stopId').textContent   = 'STOP ' + CONFIG.STOP_ID;
-$('#stopName').textContent = CONFIG.STOP_NAME;
-
 // case-insensitive route filter ('32X' matches '32x'); empty list = allow all
 function routeAllowed(route){
   if(!CONFIG.ROUTES.length) return true;
@@ -283,11 +269,12 @@ let lastGood   = null;    // timestamp of last successful load
 function pad(n){ return String(n).padStart(2,'0'); }
 function tickClock(){
   const d = new Date();
-  $('#clock').textContent = pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+  $('#statusRight').textContent = pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
 }
 
 /* ---- feed status pill -------------------------------------------- */
 function setFeed(state, txt){
+  if(!feedEl) return;                  // header pill removed
   feedEl.className = 'feed ' + state;   // '', 'ok', 'warn'
   feedTxt.textContent = txt;
 }
@@ -338,10 +325,7 @@ function setStatus(){
     $('#statusLeft').textContent =
       CONFIG.API_URL ? `updated ${secs}s ago` : 'demo feed · mock data';
   }
-  const live = departures.filter(d=>d.live).length;
-  $('#statusRight').textContent =
-    (CONFIG.ROUTES.length ? 'routes '+CONFIG.ROUTES.join(' ')+' · ' : '') +
-    `${live} tracked`;
+  // footer-right is the clock now (see tickClock)
 }
 
 /* ====================================================================
