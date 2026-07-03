@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Stop 5510 — Departures</title>
+
+<!-- ===================================================================
+     BUS BOARD  ·  Stop 5510, Wellington
+     Single-file wall display. Dark / AMOLED-safe. Landscape.
+
+     >>> EDIT ME <<<  everything you'll want to change lives in CONFIG below.
+     Runs on mock data until you set API_URL to your Netlify proxy.
+==================================================================== -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:        #000000;   /* true black = AMOLED pixels off        */
+    --amber:     #FFB000;   /* countdown / signage primary           */
+    --amber-dim: #7a5400;   /* amber at rest                         */
+    --ink:       #EDEDE6;   /* destinations — warm near-white        */
+    --muted:     #6E6E68;   /* scheduled / secondary readouts        */
+    --faint:     #38382f;   /* hairlines                             */
+    --live:      #4ADE80;   /* GPS-tracked pip (the one cool accent) */
+    --row-gap:   clamp(2px, 0.5vh, 8px);
+
+    --f-sign: 'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', sans-serif;
+    --f-mono: 'IBM Plex Mono', ui-monospace, 'Courier New', monospace;
+  }
+
+  *{ margin:0; padding:0; box-sizing:border-box; }
+
+  html,body{ height:100%; background:var(--bg); overflow:hidden; }
+  body{
+    font-family:var(--f-sign);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    user-select:none; -webkit-user-select:none;
+    cursor:none;                       /* wall display, no pointer   */
+  }
+
+  /* burn-in guard: the whole board drifts a few px very slowly so no
+     pixel carries a fixed bright element for long. */
+  #board{
+    height:100%;
+    display:flex; flex-direction:column;
+    padding:clamp(18px,2.6vh,34px) clamp(22px,3vw,46px);
+    animation:drift 141s ease-in-out infinite alternate;
+  }
+  @keyframes drift{
+    0%   { transform:translate(0,0); }
+    100% { transform:translate(6px,4px); }
+  }
+
+  /* ---- header : machine layer (mono) -------------------------------- */
+  header{
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-family:var(--f-mono);
+    padding-bottom:clamp(10px,1.4vh,18px);
+    border-bottom:1px solid var(--faint);
+  }
+  .stop{ display:flex; align-items:baseline; gap:.7ch; }
+  .stop .id{
+    font-size:clamp(20px,3vh,34px); font-weight:600; letter-spacing:.02em;
+    color:var(--ink);
+  }
+  .stop .name{
+    font-size:clamp(14px,1.9vh,22px); font-weight:400; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--muted);
+  }
+  .clock{ display:flex; align-items:baseline; gap:1.2ch; }
+  .clock .time{
+    font-size:clamp(22px,3.2vh,38px); font-weight:500;
+    letter-spacing:.04em; color:var(--ink); font-variant-numeric:tabular-nums;
+  }
+  .clock .feed{
+    font-size:clamp(11px,1.4vh,15px); letter-spacing:.18em; text-transform:uppercase;
+    color:var(--muted); display:flex; align-items:center; gap:.7ch;
+  }
+  .feed .dot{ width:.62em; height:.62em; border-radius:50%; background:var(--muted); }
+  .feed.ok   .dot{ background:var(--live); animation:breathe 2.6s ease-in-out infinite; }
+  .feed.warn .dot{ background:var(--amber); }
+  .feed.ok   { color:#9aa79a; }
+
+  /* ---- departures list --------------------------------------------- */
+  #list{
+    flex:1; display:flex; flex-direction:column;
+    justify-content:space-evenly;
+    padding:clamp(6px,1.2vh,16px) 0;
+  }
+  .row{
+    display:grid;
+    grid-template-columns: minmax(1.9em,auto) 1fr auto;
+    align-items:center;
+    gap:clamp(14px,2vw,34px);
+    padding:var(--row-gap) 2px;
+    transition:opacity .5s ease, transform .5s ease;
+  }
+  .row.leaving{ opacity:0; transform:translateY(-8px); }
+  .row.entering{ opacity:0; transform:translateY(10px); }
+
+  /* route badge — outlined box, not a big bright fill (AMOLED-kind) */
+  .route{
+    justify-self:start;
+    font-family:var(--f-sign); font-weight:700;
+    font-size:clamp(30px,6.2vh,64px); line-height:1;
+    color:var(--amber);
+    border:2px solid var(--amber-dim);
+    border-radius:10px;
+    padding:.06em .3em .12em;
+    min-width:1.9em; text-align:center;
+    font-variant-numeric:tabular-nums;
+  }
+  .dest{
+    font-family:var(--f-sign); font-weight:600;
+    font-size:clamp(30px,6.4vh,66px); line-height:1.2;
+    color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    letter-spacing:.005em;
+  }
+  .dest .via{
+    display:block; font-size:.34em; font-weight:500; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--muted); margin-top:.35em;
+    font-family:var(--f-mono);
+  }
+
+  /* countdown — the thing you read from across the room */
+  .eta{ justify-self:end; display:flex; align-items:baseline; gap:.4ch; }
+  .eta .pip{
+    width:.42em; height:.42em; border-radius:50%; background:transparent;
+    align-self:center; margin-right:.4ch;
+    box-shadow:0 0 0 0 rgba(74,222,128,0);
+  }
+  .row.live .eta .pip{ background:var(--live); animation:breathe 2.6s ease-in-out infinite; }
+  .mins{
+    font-family:var(--f-sign); font-weight:700;
+    font-size:clamp(46px,10vh,104px); line-height:.82;
+    color:var(--amber); font-variant-numeric:tabular-nums;
+    text-align:right; min-width:2.1ch;
+  }
+  .unit{
+    font-family:var(--f-mono); font-weight:500;
+    font-size:clamp(13px,1.8vh,20px); letter-spacing:.1em; text-transform:lowercase;
+    color:var(--muted);
+  }
+  .row.due .mins{ animation:flash 1.05s steps(1,end) infinite; }
+  .row.due .unit{ display:none; }
+
+  /* cancelled service — clearly not happening */
+  .row.cancelled{ opacity:.5; }
+  .row.cancelled .dest{ text-decoration:line-through; text-decoration-thickness:2px; color:var(--muted); }
+  .row.cancelled .route{ color:var(--muted); border-color:var(--faint); }
+  .mins.cxl{
+    color:var(--muted);
+    font-size:clamp(20px,3.4vh,34px); font-weight:600;
+    letter-spacing:.04em; text-transform:uppercase;
+  }
+
+  /* ---- footer : status readout ------------------------------------- */
+  footer{
+    display:flex; justify-content:space-between; align-items:center;
+    font-family:var(--f-mono); font-size:clamp(11px,1.4vh,15px);
+    letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+    padding-top:clamp(8px,1.2vh,16px);
+    border-top:1px solid var(--faint);
+  }
+
+  /* ---- empty / boot states ----------------------------------------- */
+  #empty{
+    flex:1; display:none; align-items:center; justify-content:center;
+    font-family:var(--f-sign); font-weight:500;
+    font-size:clamp(26px,5vh,54px); color:var(--muted); letter-spacing:.02em;
+  }
+  #list.hidden{ display:none; }
+  #empty.show{ display:flex; }
+
+  @keyframes breathe{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  @keyframes flash  { 0%,100%{opacity:1;} 50%{opacity:.15;} }
+
+  @media (prefers-reduced-motion: reduce){
+    #board{ animation:none; }
+    .feed .dot, .row.live .eta .pip{ animation:none !important; }
+    .row.due .mins{ animation:none; opacity:1; }
+  }
+
+  /* ---- PORTRAIT : primary wall orientation --------------------------
+     sizes here are width-driven (vw) so the big number fills the narrow
+     axis without overrunning the destination. */
+  @media (orientation: portrait){
+    #board{ padding:clamp(26px,3.4vh,48px) clamp(22px,5vw,44px); }
+
+    header{ align-items:flex-start; padding-bottom:clamp(16px,1.8vh,26px); }
+    .stop{ flex-direction:column; align-items:flex-start; gap:.18em; }
+    .stop .id{ font-size:clamp(34px,8vw,58px); }
+    .stop .name{ font-size:clamp(15px,3.6vw,24px); }
+    .clock{ flex-direction:column; align-items:flex-end; gap:.15em; }
+    .clock .time{ font-size:clamp(30px,8.2vw,54px); }
+    .clock .feed{ font-size:clamp(12px,2.8vw,16px); }
+
+    #list{ padding:clamp(12px,2.4vh,32px) 0; }
+    .row{ gap:clamp(12px,3.2vw,30px); padding:clamp(8px,1.2vh,20px) 2px; }
+    .route{ font-size:clamp(32px,9.5vw,62px); }
+    .dest{ font-size:clamp(30px,7.8vw,54px); }
+    .dest .via{ font-size:.36em; }
+    .mins{ font-size:clamp(56px,17vw,116px); }
+    .unit{ font-size:clamp(14px,3vw,19px); }
+
+    #empty{ font-size:clamp(28px,6.5vw,52px); }
+    footer{ font-size:clamp(12px,2.6vw,16px); }
+  }
+</style>
+</head>
+<body>
+  <div id="board">
+    <header>
+      <div class="stop">
+        <span class="id" id="stopId">STOP 5510</span>
+        <span class="name" id="stopName">—</span>
+      </div>
+      <div class="clock">
+        <span class="time" id="clock">--:--:--</span>
+        <span class="feed" id="feed"><span class="dot"></span><span id="feedTxt">boot</span></span>
+      </div>
+    </header>
+
+    <div id="list"></div>
+    <div id="empty">No buses in the next hour</div>
+
+    <footer>
+      <span id="statusLeft">waiting for first departures…</span>
+      <span id="statusRight"></span>
+    </footer>
+  </div>
+
+<script>
+/* ====================================================================
+   CONFIG  —  the only block you should need to touch
+==================================================================== */
+const CONFIG = {
+  STOP_ID:   '5510',
+  STOP_NAME: 'Wellington',        // shown next to the stop number
+
+  // Filter to specific routes. Empty array = show everything at the stop.
+  // Matching is case-insensitive, so '32X' also catches Metlink's '32x'.
+  ROUTES: ['1','32X','29'],
+
+  MAX_ROWS:    6,       // how many departures to show
+  WINDOW_MIN:  90,      // ignore anything further out than this many minutes
+  REFRESH_MS:  25000,   // how often to pull the feed
+
+  // Your Netlify proxy that wraps Metlink stop-predictions and adds CORS.
+  // Leave '' to run on the built-in mock data (numbers still tick down).
+  API_URL: '/api/stop?stop=5510',
+};
+
+/* ====================================================================
+   Everything below is plumbing. The board consumes a normalised shape:
+     { route, dest, via, etaMs (Date.now()-relative target), live:bool }
+   so swapping mock -> real proxy is just the fetch/parse layer.
+==================================================================== */
+
+const $ = s => document.querySelector(s);
+const listEl = $('#list'), emptyEl = $('#empty');
+const feedEl = $('#feed'), feedTxt = $('#feedTxt');
+
+$('#stopId').textContent   = 'STOP ' + CONFIG.STOP_ID;
+$('#stopName').textContent = CONFIG.STOP_NAME;
+
+// case-insensitive route filter ('32X' matches '32x'); empty list = allow all
+function routeAllowed(route){
+  if(!CONFIG.ROUTES.length) return true;
+  return CONFIG.ROUTES.some(r => r.toLowerCase() === String(route).toLowerCase());
+}
+
+let departures = [];      // normalised, sorted soonest-first
+let lastGood   = null;    // timestamp of last successful load
+
+/* ---- clock ------------------------------------------------------- */
+function pad(n){ return String(n).padStart(2,'0'); }
+function tickClock(){
+  const d = new Date();
+  $('#clock').textContent = pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+}
+
+/* ---- feed status pill -------------------------------------------- */
+function setFeed(state, txt){
+  feedEl.className = 'feed ' + state;   // '', 'ok', 'warn'
+  feedTxt.textContent = txt;
+}
+
+/* ---- minutes-until helper ---------------------------------------- */
+function minsUntil(target){
+  return Math.round((target - Date.now()) / 60000);
+}
+
+/* ---- render ------------------------------------------------------ */
+function render(){
+  const now = Date.now();
+
+  // drop departed / out-of-window, sort, cap
+  let items = departures
+    .filter(d => (d.target - now) > -60000)                 // keep until ~1min past
+    .filter(d => minsUntil(d.target) <= CONFIG.WINDOW_MIN)
+    .sort((a,b) => a.target - b.target)
+    .slice(0, CONFIG.MAX_ROWS);
+
+  if(items.length === 0){
+    listEl.classList.add('hidden'); emptyEl.classList.add('show'); return;
+  }
+  listEl.classList.remove('hidden'); emptyEl.classList.remove('show');
+
+  listEl.innerHTML = items.map(d => {
+    const m = minsUntil(d.target);
+    const due = m <= 1;
+    const cls = ['row', d.cancelled ? 'cancelled':'', d.live ? 'live':'', due ? 'due':'']
+      .filter(Boolean).join(' ');
+    let etaInner;
+    if(d.cancelled)      etaInner = `<span class="mins cxl">cancelled</span>`;
+    else if(due)         etaInner = `<span class="mins">DUE</span>`;
+    else                 etaInner = `<span class="mins">${m}</span><span class="unit">min</span>`;
+    return `
+      <div class="${cls}">
+        <span class="route">${d.route}</span>
+        <span class="dest">${d.dest}${d.via ? `<span class="via">via ${d.via}</span>`:''}</span>
+        <span class="eta"><span class="pip"></span>${etaInner}</span>
+      </div>`;
+  }).join('');
+}
+
+/* ---- footer status ----------------------------------------------- */
+function setStatus(){
+  if(lastGood){
+    const secs = Math.round((Date.now()-lastGood)/1000);
+    $('#statusLeft').textContent =
+      CONFIG.API_URL ? `updated ${secs}s ago` : 'demo feed · mock data';
+  }
+  const live = departures.filter(d=>d.live).length;
+  $('#statusRight').textContent =
+    (CONFIG.ROUTES.length ? 'routes '+CONFIG.ROUTES.join(' ')+' · ' : '') +
+    `${live} tracked`;
+}
+
+/* ====================================================================
+   DATA LAYER
+==================================================================== */
+
+// -- real feed (Metlink stop-predictions, via your proxy) -----------
+async function loadReal(){
+  const res = await fetch(CONFIG.API_URL, {cache:'no-store'});
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const json = await res.json();
+
+  // Metlink shape: { departures:[ { service_id, name, destination:{name},
+  //   status, departure:{ aimed, expected }, ... } ] }
+  const list = (json.departures || []).map(d => {
+    const t = d.departure || {};
+    const iso = t.expected || t.aimed;          // prefer real-time
+    const status = (d.status || '').toLowerCase();
+    return {
+      route: d.service_id,
+      dest:  (d.destination && d.destination.name) || d.name || '',
+      via:   null,
+      target: new Date(iso).getTime(),
+      live:  Boolean(t.expected) && t.expected !== t.aimed,
+      cancelled: status === 'cancelled',
+    };
+  });
+
+  departures = list.filter(d => routeAllowed(d.route));
+
+  lastGood = Date.now();
+  setFeed('ok','live');
+}
+
+// -- mock feed (self-perpetuating so the board feels alive) ----------
+// destinations here are placeholders — the live feed replaces them
+const MOCK_SEED = [
+  {route:'1',   dest:'Island Bay',     via:'Newtown',    offset: 3, live:true },
+  {route:'32X', dest:'Houghton Bay',   via:null,         offset: 6, live:true },
+  {route:'29',  dest:'Wellington Stn', via:'Brooklyn',   offset: 9, live:false},
+  {route:'1',   dest:'Johnsonville',   via:'Churton Pk', offset:14, live:true },
+  {route:'29',  dest:'Owhiro Bay',     via:'Mornington', offset:21, live:false},
+  {route:'32X', dest:'Houghton Bay',   via:null,         offset:27, live:true },
+  {route:'1',   dest:'Island Bay',     via:'Newtown',    offset:33, live:false},
+];
+function seedMock(){
+  const now = Date.now();
+  departures = MOCK_SEED
+    .filter(s => routeAllowed(s.route))
+    .map(s => ({
+      route:s.route, dest:s.dest, via:s.via,
+      target: now + s.offset*60000 + Math.floor(Math.random()*40000),
+      live:s.live,
+    }));
+  lastGood = now;
+  setFeed('ok','demo');
+}
+function recycleMock(){
+  // any bus that has departed gets pushed ~35-45min out so the board stays full
+  const now = Date.now();
+  departures.forEach(d => {
+    if(d.target - now < -60000){
+      d.target = now + (35 + Math.random()*10)*60000;
+      d.live = Math.random() > 0.4;
+    }
+  });
+}
+
+/* ---- refresh loop ------------------------------------------------ */
+async function refresh(){
+  try{
+    if(CONFIG.API_URL){ await loadReal(); }
+    else              { recycleMock(); setFeed('ok','demo'); }
+  }catch(err){
+    // never blank the board — keep last good data, flag the feed
+    setFeed('warn','reconnecting');
+    console.warn('feed error:', err);
+  }
+  render(); setStatus();
+}
+
+/* ---- boot -------------------------------------------------------- */
+tickClock();
+setInterval(tickClock, 1000);
+
+if(!CONFIG.API_URL) seedMock();
+refresh();
+setInterval(refresh, CONFIG.REFRESH_MS);
+
+// re-render every 15s so countdowns stay fresh between feed pulls
+setInterval(() => { render(); setStatus(); }, 15000);
+</script>
+</body>
+</html>
