@@ -244,6 +244,7 @@ export default async function handler() {
     merge_variables: {
       today_date:      todayLabel,
       updated_at:      updatedAt,
+      heartbeat:       heartbeat,
       calendar_events: events,
       weather_temp:    weatherTemp,
       weather_high:    weatherHigh,
