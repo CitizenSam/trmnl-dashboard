@@ -221,6 +221,9 @@ export default async function handler() {
     .sort((a, b) => a.sort_time - b.sort_time)
     .map(({ sort_time, ...event }) => event);
 
+    // ── Heartbeat: guarantees this payload always looks "new" to TRMNL ────────
+  const heartbeat = nowUTC.toISOString();
+  
   // ── Updated-at label ──────────────────────────────────────────────────────
   const updatedAt = nowUTC.toLocaleTimeString("en-NZ", {
     timeZone: "Pacific/Auckland",
